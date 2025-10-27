@@ -1,0 +1,594 @@
+import gspread
+import logging
+from oauth2client.service_account import ServiceAccountCredentials
+from config import GOOGLE_SHEETS_CONFIG
+from datetime import date, datetime, timedelta
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def update_google_sheet(data: list[dict]):
+    """
+    Авторизуется в Google Sheets и обновляет данные на листе,
+    сохраняя существующее форматирование таблицы.
+    Ищет строки по дате и обновляет их. Если дата не найдена,
+    добавляет новую строку в конец таблицы, наследуя форматирование.
+
+    Args:
+        data: Полный список словарей с данными для загрузки.
+    """
+    try:
+        logging.info("Авторизация в Google Sheets...")
+        scope = ["https://spreadsheets.google.com/feeds", 'https://www.googleapis.com/auth/spreadsheets',
+                 "https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/drive"]
+        
+        creds = ServiceAccountCredentials.from_json_keyfile_name(
+            GOOGLE_SHEETS_CONFIG['credentials_file'], scope
+        )
+        client = gspread.authorize(creds)
+
+        logging.info(f"Открытие таблицы '{GOOGLE_SHEETS_CONFIG['spreadsheet_name']}'...")
+        spreadsheet = client.open(GOOGLE_SHEETS_CONFIG['spreadsheet_name'])
+        sheet = spreadsheet.worksheet(GOOGLE_SHEETS_CONFIG['worksheet_name'])
+        
+        logging.info("Получение существующих данных из таблицы...")
+        try:
+            sheet_values = sheet.get_all_values()
+        except gspread.exceptions.GSpreadException as e:
+            logging.warning(f"Не удалось прочитать лист (возможно, он пуст): {e}")
+            sheet_values = []
+
+        # 1. Подготавливаем новые данные
+        header = ['Дата', 'Изделия', 'Раздвижки', 'МС', 'СП и стекла', 'Сэндвичи', 'Подоконники', 'Железо']
+        processed_new_data = []
+        for row in data:
+            processed_row = {}
+            for key, value in row.items():
+                # Приводим ключи БД к названиям столбцов в таблице
+                new_key = {'PRODDATE': 'Дата', 'QTY_IZD_PVH': 'Изделия', 'QTY_RAZDV': 'Раздвижки', 'QTY_MOSNET': 'МС', 'QTY_GLASS_PACKS': 'СП и стекла', 'QTY_SANDWICHES': 'Сэндвичи', 'QTY_WINDOWSILLS': 'Подоконники', 'QTY_IRON': 'Железо'}.get(key, key)
+                if isinstance(value, (date, datetime)):
+                    processed_row[new_key] = value.strftime('%d.%m.%Y')
+                else:
+                    processed_row[new_key] = value
+            processed_new_data.append(processed_row)
+
+        if not processed_new_data and not sheet_values:
+            logging.info("Нет ни существующих, ни новых данных. Лист оставлен пустым.")
+            return
+
+        # Если лист пуст, просто вставляем все данные с заголовком
+        if not sheet_values:
+            logging.info("Лист пуст. Вставляем все данные с заголовком.")
+            
+            now = datetime.now().strftime('%d.%m.%Y %H:%M:%S')
+            sheet.update('F1', [[f"Последнее обновление: {now}"]], value_input_option='USER_ENTERED')
+            
+            rows_to_insert = [header]
+            
+            for i, row_dict in enumerate(processed_new_data):
+                row_values = [row_dict.get(h, '') for h in header]
+                rows_to_insert.append(row_values)
+            
+            sheet.update('A2', rows_to_insert, value_input_option='USER_ENTERED')
+            logging.info("Данные успешно загружены.")
+            return
+
+        # Если лист не пуст, выполняем обновление/добавление
+        current_header = [str(h).strip() for h in sheet_values[1]] if len(sheet_values) > 1 else []
+        try:
+            date_column_index = current_header.index('Дата')
+        except ValueError:
+            logging.error("На листе в строке 2 отсутствует столбец 'Дата'. Невозможно выполнить обновление.")
+            return
+
+        # Создаем карту существующих дат и их номеров строк (1-based index)
+        date_to_row_map = {row[date_column_index]: i for i, row in enumerate(sheet_values[2:], start=3)}
+
+        updates_batch = []
+        new_rows_to_insert = []
+
+        for row_dict in processed_new_data:
+            date_str = row_dict.get('Дата')
+            if not date_str:
+                continue
+
+            # Собираем значения в том порядке, как они в заголовке на листе
+            row_values = [row_dict.get(h, '') for h in current_header]
+
+            if date_str in date_to_row_map:
+                row_number = date_to_row_map[date_str]
+                
+                updates_batch.append({
+                    'range': f'A{row_number}:{chr(ord("A")+len(current_header)-1)}{row_number}',
+                    'values': [row_values]
+                })
+            else:
+                # Если такой даты нет, это новая строка
+                # Проверяем, чтобы эта дата не была уже в списке на добавление
+                if date_str not in [r[date_column_index] for r in new_rows_to_insert]:
+                     new_rows_to_insert.append(row_values)
+        
+        if updates_batch:
+            logging.info(f"Обновление {len(updates_batch)} существующих строк...")
+            sheet.batch_update(updates_batch, value_input_option='USER_ENTERED')
+
+        if new_rows_to_insert:
+            # Сортируем новые строки по дате перед вставкой
+            try:
+                new_rows_to_insert.sort(key=lambda r: datetime.strptime(r[date_column_index], '%d.%m.%Y'))
+            except (ValueError, IndexError):
+                logging.warning("Не удалось отсортировать новые строки перед вставкой.")
+
+            logging.info(f"Добавление {len(new_rows_to_insert)} новых строк в конец таблицы...")
+            # Вставляем строки после последней существующей строки, наследуя форматирование
+            sheet.insert_rows(
+                new_rows_to_insert,
+                row=len(sheet_values) + 1,
+                value_input_option='USER_ENTERED',
+                inherit_from_before=True
+            )
+            
+        # Отображаем только записи в окне: от 2 дней до сегодня и +5 дней
+        # Реализуем через скрытие строк вне окна, чтобы избежать конфликтов базового фильтра
+        try:
+            logging.info("Применение окна отображения по дате (−2 до +5 дней)...")
+
+            # Перечитываем данные после всех изменений, чтобы получить актуальные строки
+            latest_values = sheet.get_all_values()
+            if not latest_values:
+                logging.info("Лист пуст после обновления — нечего фильтровать.")
+            else:
+                current_header = [str(h).strip() for h in latest_values[1]] if len(latest_values) > 1 else []
+                try:
+                    date_column_index = current_header.index('Дата')
+                except ValueError:
+                    logging.error("Столбец 'Дата' не найден — пропускаю применение окна отображения.")
+                    date_column_index = None
+
+                if date_column_index is not None:
+                    # Границы окна
+                    today = date.today()
+                    start_date = today - timedelta(days=2)
+                    end_date = today + timedelta(days=5)
+
+                    # Собираем индексы строк (0-based в API; 1-я строка — заголовок) вне окна
+                    rows_outside_window_zero_based = []
+                    for row_1_based, row in enumerate(latest_values[2:], start=3):
+                        raw_date = row[date_column_index] if date_column_index < len(row) else ''
+                        try:
+                            row_date = datetime.strptime(raw_date, '%d.%m.%Y').date()
+                            in_window = (start_date <= row_date <= end_date)
+                        except Exception:
+                            # Если дата не парсится — скрываем
+                            in_window = False
+
+                        if not in_window:
+                            # Преобразуем в 0-based индекс строки для API
+                            rows_outside_window_zero_based.append(row_1_based - 1)
+
+                    # Сначала показываем все строки (снимаем скрытие)
+                    sheet_id = sheet.id if hasattr(sheet, 'id') else sheet._properties.get('sheetId')
+                    total_rows = len(latest_values)
+
+                    requests = []
+                    if total_rows > 1:
+                        requests.append({
+                            'updateDimensionProperties': {
+                                'range': {
+                                    'sheetId': sheet_id,
+                                    'dimension': 'ROWS',
+                                    'startIndex': 2,   # пропускаем заголовок и инфо
+                                    'endIndex': total_rows
+                                },
+                                'properties': {
+                                    'hiddenByUser': False
+                                },
+                                'fields': 'hiddenByUser'
+                            }
+                        })
+
+                    # Группируем внеоконные строки в непрерывные диапазоны для минимизации запросов
+                    def group_contiguous(indices: list[int]) -> list[tuple[int, int]]:
+                        if not indices:
+                            return []
+                        indices.sort()
+                        ranges = []
+                        start = prev = indices[0]
+                        for idx in indices[1:]:
+                            if idx == prev + 1:
+                                prev = idx
+                                continue
+                            ranges.append((start, prev + 1))  # end exclusive
+                            start = prev = idx
+                        ranges.append((start, prev + 1))
+                        return ranges
+
+                    hide_ranges_zero_based = group_contiguous(rows_outside_window_zero_based)
+                    for start_idx, end_idx in hide_ranges_zero_based:
+                        # Не скрываем заголовок; start_idx >= 2 гарантированно
+                        if start_idx >= end_idx:
+                            continue
+                        requests.append({
+                            'updateDimensionProperties': {
+                                'range': {
+                                    'sheetId': sheet_id,
+                                    'dimension': 'ROWS',
+                                    'startIndex': start_idx,
+                                    'endIndex': end_idx
+                                },
+                                'properties': {
+                                    'hiddenByUser': True
+                                },
+                                'fields': 'hiddenByUser'
+                            }
+                        })
+
+                    if requests:
+                        spreadsheet.batch_update({'requests': requests})
+                        logging.info(
+                            "Окно отображения применено: показаны даты от %s до %s, скрыто диапазонов: %d",
+                            start_date.strftime('%d.%m.%Y'), end_date.strftime('%d.%m.%Y'),
+                            max(0, len(requests) - 1) if total_rows > 1 else 0
+                        )
+        except Exception as e:
+            logging.error(f"Произошла ошибка при применении окна отображения: {e}")
+
+        try:
+            logging.info("Обновление времени последнего обновления в ячейке F1...")
+            now = datetime.now().strftime('%d.%m.%Y %H:%M:%S')
+            sheet.update('F1', [[f"Последнее обновление: {now}"]])
+            logging.info("Время последнего обновления успешно записано в F1.")
+        except Exception as e:
+            logging.error(f"Не удалось обновить ячейку F1: {e}")
+
+        # Применяем форматирование: шрифт 14 жирный для всей таблицы
+        try:
+            logging.info("Применение форматирования шрифта (14, жирный)...")
+            sheet_id = sheet.id if hasattr(sheet, 'id') else sheet._properties.get('sheetId')
+            
+            # Перечитываем данные для получения актуального количества строк
+            latest_values = sheet.get_all_values()
+            total_rows = len(latest_values)
+            
+            format_requests = []
+            
+            # Применяем шрифт 14 и жирный ко всей таблице
+            if total_rows > 0:
+                format_requests.append({
+                    'repeatCell': {
+                        'range': {
+                            'sheetId': sheet_id,
+                            'startRowIndex': 1,
+                            'endRowIndex': total_rows
+                        },
+                        'cell': {
+                            'userEnteredFormat': {
+                                'textFormat': {
+                                    'fontSize': 14,
+                                    'bold': True
+                                }
+                            }
+                        },
+                        'fields': 'userEnteredFormat.textFormat.fontSize,userEnteredFormat.textFormat.bold'
+                    }
+                })
+            
+            # Сначала убираем зеленое выделение со всех строк (кроме заголовка)
+            # Сбрасываем фон на белый для всех строк с данными (первые 4 столбца)
+            if total_rows > 2:
+                format_requests.append({
+                    'repeatCell': {
+                        'range': {
+                            'sheetId': sheet_id,
+                            'startRowIndex': 2,  # С третьей строки 
+                            'endRowIndex': total_rows,
+                            'startColumnIndex': 0,  # Столбец A
+                            'endColumnIndex': 8      # До столбца H включительно
+                        },
+                        'cell': {
+                            'userEnteredFormat': {
+                                'backgroundColor': {
+                                    'red': 1.0,
+                                    'green': 1.0,
+                                    'blue': 1.0
+                                },
+                                'textFormat': {
+                                    'fontSize': 14,
+                                    'bold': True
+                                }
+                            }
+                        },
+                        'fields': 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.fontSize,userEnteredFormat.textFormat.bold'
+                    }
+                })
+            
+            # Находим строку с текущей датой и выделяем только первые 6 ячеек светло-зеленым
+            today_str = date.today().strftime('%d.%m.%Y')
+            current_header = [str(h).strip() for h in latest_values[1]] if len(latest_values) > 1 else []
+            
+            try:
+                date_column_index = current_header.index('Дата')
+                for row_idx, row in enumerate(latest_values[2:], start=2):
+                    if row[date_column_index] == today_str:
+                        # Выделяем только первые 6 ячейки строки светло-зеленым цветом
+                        format_requests.append({
+                            'repeatCell': {
+                                'range': {
+                                    'sheetId': sheet_id,
+                                    'startRowIndex': row_idx,
+                                    'endRowIndex': row_idx + 1,
+                                    'startColumnIndex': 0,  # Столбец A
+                                    'endColumnIndex': 8      # До столбца H включительно
+                                },
+                                'cell': {
+                                    'userEnteredFormat': {
+                                        'backgroundColor': {
+                                            'red': 0.85,
+                                            'green': 0.92,
+                                            'blue': 0.83
+                                        },
+                                        'textFormat': {
+                                            'fontSize': 14,
+                                            'bold': True
+                                        }
+                                    }
+                                },
+                                'fields': 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.fontSize,userEnteredFormat.textFormat.bold'
+                            }
+                        })
+                        logging.info(f"Найдена и выделена строка с текущей датой: {today_str} (строка {row_idx + 1}, столбцы A-H)")
+                        break
+            except (ValueError, IndexError):
+                logging.warning("Столбец 'Дата' не найден для выделения текущего дня.")
+            
+            if format_requests:
+                spreadsheet.batch_update({'requests': format_requests})
+                logging.info("Форматирование успешно применено.")
+        except Exception as e:
+            logging.error(f"Ошибка при применении форматирования: {e}")
+
+        logging.info("Обновление данных в Google Sheets завершено.")
+
+    except FileNotFoundError:
+        logging.error(f"Файл {GOOGLE_SHEETS_CONFIG['credentials_file']} не найден. "
+                      f"Пожалуйста, убедитесь, что он находится в корневом каталоге проекта.")
+    except Exception as e:
+        logging.error(f"Произошла ошибка при работе с Google Sheets: {e}")
+
+def update_google_sheet_by_order(data: list[dict]):
+    """
+    Авторизуется в Google Sheets и обновляет данные на листе "Расшифр по заказам".
+    """
+    try:
+        logging.info("Авторизация в Google Sheets для обновления данных по заказам...")
+        scope = ["https://spreadsheets.google.com/feeds", 'https://www.googleapis.com/auth/spreadsheets',
+                 "https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/drive"]
+        
+        creds = ServiceAccountCredentials.from_json_keyfile_name(
+            GOOGLE_SHEETS_CONFIG['credentials_file'], scope
+        )
+        client = gspread.authorize(creds)
+
+        logging.info(f"Открытие таблицы '{GOOGLE_SHEETS_CONFIG['spreadsheet_name']}'...")
+        spreadsheet = client.open(GOOGLE_SHEETS_CONFIG['spreadsheet_name'])
+        sheet = spreadsheet.worksheet(GOOGLE_SHEETS_CONFIG['worksheet_name_by_order'])
+        
+        logging.info("Получение существующих данных из таблицы по заказам...")
+        try:
+            sheet_values = sheet.get_all_values()
+        except gspread.exceptions.GSpreadException as e:
+            logging.warning(f"Не удалось прочитать лист (возможно, он пуст): {e}")
+            sheet_values = []
+
+        header = ['Дата', 'ЗАКАЗ', 'Изделия', 'Раздвижки', 'МС', 'СП и стекла', 'Сэндвичи', 'Подоконники', 'Железо']
+        processed_new_data = []
+        for row in data:
+            processed_row = {}
+            for key, value in row.items():
+                new_key = {'PRODDATE': 'Дата', 'ORDERNO': 'ЗАКАЗ', 'QTY_IZD_PVH': 'Изделия', 'QTY_RAZDV': 'Раздвижки', 'QTY_MOSNET': 'МС', 'QTY_GLASS_PACKS': 'СП и стекла', 'QTY_SANDWICHES': 'Сэндвичи', 'QTY_WINDOWSILLS': 'Подоконники', 'QTY_IRON': 'Железо'}.get(key, key)
+                if isinstance(value, (date, datetime)):
+                    processed_row[new_key] = value.strftime('%d.%m.%Y')
+                else:
+                    processed_row[new_key] = value
+            processed_new_data.append(processed_row)
+
+        if not processed_new_data and not sheet_values:
+            logging.info("Нет ни существующих, ни новых данных. Лист по заказам оставлен пустым.")
+            return
+
+        if not sheet_values:
+            logging.info("Лист по заказам пуст. Вставляем все данные с заголовком.")
+            now = datetime.now().strftime('%d.%m.%Y %H:%M:%S')
+            sheet.update('F1', [[f"Последнее обновление: {now}"]], value_input_option='USER_ENTERED')
+            rows_to_insert = [header]
+            for row_dict in processed_new_data:
+                rows_to_insert.append([row_dict.get(h, 0) for h in header])
+            sheet.update('A2', rows_to_insert, value_input_option='USER_ENTERED')
+            logging.info("Данные по заказам успешно загружены.")
+            return
+
+        current_header = [str(h).strip() for h in sheet_values[1]] if len(sheet_values) > 1 else []
+        try:
+            date_column_index = current_header.index('Дата')
+            order_column_index = current_header.index('ЗАКАЗ')
+        except ValueError as e:
+            logging.error(f"На листе '{GOOGLE_SHEETS_CONFIG['worksheet_name_by_order']}' отсутствует обязательный столбец: {e}. Невозможно выполнить обновление.")
+            return
+
+        # Composite key: (date, order) -> row_number
+        existing_data_map = {(row[date_column_index], str(row[order_column_index])): i for i, row in enumerate(sheet_values[2:], start=3)}
+
+        updates_batch = []
+        new_rows_to_insert = []
+
+        for row_dict in processed_new_data:
+            date_str = row_dict.get('Дата')
+            order_str = str(row_dict.get('ЗАКАЗ'))
+            if not date_str or not order_str:
+                continue
+            
+            row_values = [row_dict.get(h, 0) for h in current_header]
+
+            composite_key = (date_str, order_str)
+            if composite_key in existing_data_map:
+                row_number = existing_data_map[composite_key]
+                updates_batch.append({
+                    'range': f'A{row_number}:{chr(ord("A")+len(current_header)-1)}{row_number}',
+                    'values': [row_values]
+                })
+            else:
+                new_rows_to_insert.append(row_values)
+        
+        if updates_batch:
+            logging.info(f"Обновление {len(updates_batch)} существующих строк в листе по заказам...")
+            sheet.batch_update(updates_batch, value_input_option='USER_ENTERED')
+
+        if new_rows_to_insert:
+            logging.info(f"Добавление {len(new_rows_to_insert)} новых строк в конец таблицы по заказам...")
+            sheet.insert_rows(
+                new_rows_to_insert,
+                row=len(sheet_values) + 1,
+                value_input_option='USER_ENTERED'
+            )
+        
+        try:
+            logging.info("Обновление времени последнего обновления в ячейке F1...")
+            now = datetime.now().strftime('%d.%m.%Y %H:%M:%S')
+            sheet.update('F1', [[f"Последнее обновление: {now}"]])
+        except Exception as e:
+            logging.error(f"Не удалось обновить ячейку F1: {e}")
+
+        # Применяем фильтрацию и форматирование
+        try:
+            logging.info("Применение форматирования и фильтрации для листа по заказам...")
+            sheet_id = sheet.id if hasattr(sheet, 'id') else sheet._properties.get('sheetId')
+            
+            latest_values = sheet.get_all_values()
+            total_rows = len(latest_values)
+            if total_rows < 2:
+                logging.info("Недостаточно строк для форматирования или фильтрации.")
+                return
+
+            requests = []
+            
+            # 1. Показываем все строки (снимаем предыдущие фильтры)
+            requests.append({
+                'updateDimensionProperties': {
+                    'range': {'sheetId': sheet_id, 'dimension': 'ROWS', 'startIndex': 2},
+                    'properties': {'hiddenByUser': False},
+                    'fields': 'hiddenByUser'
+                }
+            })
+
+            # 2. Применяем форматирование ко всем данным
+            # Форматируем ячейку F1
+            requests.append({
+                'repeatCell': {
+                    'range': {
+                        'sheetId': sheet_id,
+                        'startRowIndex': 0, 'endRowIndex': 1,
+                        'startColumnIndex': 5, 'endColumnIndex': 6
+                    },
+                    'cell': {
+                        'userEnteredFormat': {
+                            'textFormat': {'fontSize': 14, 'bold': True}
+                        }
+                    },
+                    'fields': 'userEnteredFormat.textFormat(fontSize,bold)'
+                }
+            })
+            # Шрифт 14, жирный
+            requests.append({
+                'repeatCell': {
+                    'range': {'sheetId': sheet_id, 'startRowIndex': 1, 'endRowIndex': total_rows},
+                    'cell': {'userEnteredFormat': {'textFormat': {'fontSize': 14, 'bold': True}}},
+                    'fields': 'userEnteredFormat.textFormat(fontSize,bold)'
+                }
+            })
+            # Сброс фона на белый для всех строк данных
+            requests.append({
+                'repeatCell': {
+                    'range': {'sheetId': sheet_id, 'startRowIndex': 2, 'endRowIndex': total_rows, 'startColumnIndex': 0, 'endColumnIndex': 9},
+                    'cell': {'userEnteredFormat': {'backgroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0}}},
+                    'fields': 'userEnteredFormat.backgroundColor'
+                }
+            })
+
+            # 3. Находим строки НЕ за сегодня для скрытия и строки ЗА сегодня для выделения
+            current_header = [str(h).strip() for h in latest_values[1]]
+            date_column_index = current_header.index('Дата')
+            today_str = date.today().strftime('%d.%m.%Y')
+            
+            rows_to_hide_indices = []
+            today_rows_indices = []
+
+            for i, row in enumerate(latest_values):
+                if i < 2: continue  # Пропускаем заголовки
+                row_date_str = row[date_column_index] if date_column_index < len(row) else ''
+                if row_date_str == today_str:
+                    today_rows_indices.append(i)
+                else:
+                    rows_to_hide_indices.append(i)
+            
+            # Выделяем сегодняшние строки зеленым
+            for row_idx in today_rows_indices:
+                requests.append({
+                    'repeatCell': {
+                        'range': {'sheetId': sheet_id, 'startRowIndex': row_idx, 'endRowIndex': row_idx + 1, 'startColumnIndex': 0, 'endColumnIndex': 9},
+                        'cell': {'userEnteredFormat': {'backgroundColor': {'red': 0.85, 'green': 0.92, 'blue': 0.83}}},
+                        'fields': 'userEnteredFormat.backgroundColor'
+                    }
+                })
+
+            # Группируем индексы для скрытия в диапазоны
+            def group_contiguous(indices: list[int]) -> list[tuple[int, int]]:
+                if not indices: return []
+                indices.sort()
+                ranges, start = [], indices[0]
+                for i in range(1, len(indices)):
+                    if indices[i] != indices[i-1] + 1:
+                        ranges.append((start, indices[i-1] + 1))
+                        start = indices[i]
+                ranges.append((start, indices[-1] + 1))
+                return ranges
+
+            # Скрываем строки не за сегодня
+            for start_idx, end_idx in group_contiguous(rows_to_hide_indices):
+                requests.append({
+                    'updateDimensionProperties': {
+                        'range': {'sheetId': sheet_id, 'dimension': 'ROWS', 'startIndex': start_idx, 'endIndex': end_idx},
+                        'properties': {'hiddenByUser': True},
+                        'fields': 'hiddenByUser'
+                    }
+                })
+
+            if requests:
+                spreadsheet.batch_update({'requests': requests})
+                logging.info(f"Форматирование применено. Показаны строки только за {today_str}. Скрыто {len(rows_to_hide_indices)} строк.")
+            else:
+                logging.info("Нечего форматировать или фильтровать.")
+
+        except Exception as e:
+            logging.error(f"Произошла ошибка при применении форматирования и фильтрации: {e}", exc_info=True)
+
+        logging.info("Обновление данных в Google Sheets по заказам завершено.")
+
+    except FileNotFoundError:
+        logging.error(f"Файл {GOOGLE_SHEETS_CONFIG['credentials_file']} не найден.")
+    except Exception as e:
+        logging.error(f"Произошла ошибка при работе с Google Sheets: {e}")
+
+
+if __name__ == '__main__':
+    # Пример использования:
+    # Для запуска этого примера, убедитесь, что у вас есть credentials.json
+    # и вы предоставили доступ сервисному аккаунту к вашей таблице.
+    
+    # Пример данных
+    sample_data = [
+        {'PRODDATE': date(2023, 10, 1), 'QTY_IZD_PVH': 10, 'QTY_RAZDV': 5, 'QTY_MOSNET': 20},
+        {'PRODDATE': date(2023, 10, 2), 'QTY_IZD_PVH': 12, 'QTY_RAZDV': 8, 'QTY_MOSNET': 22},
+    ]
+    
+    update_google_sheet(sample_data)
+    # print("Для тестирования этого модуля раскомментируйте вызов update_google_sheet "
+    #       "и убедитесь в наличии credentials.json")
