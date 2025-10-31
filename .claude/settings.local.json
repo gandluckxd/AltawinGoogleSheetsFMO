@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python main.py:*)",
+      "Bash(..venvScriptsactivate)",
+      "Bash(powershell -Command \"cd d:\\AltawinGoogleSheets; .\\.venv\\Scripts\\Activate.ps1; python main.py\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

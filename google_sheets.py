@@ -1,7 +1,7 @@
 import gspread
 import logging
 from oauth2client.service_account import ServiceAccountCredentials
-from config import GOOGLE_SHEETS_CONFIG
+from config import GOOGLE_SHEETS_CONFIG, GOOGLE_SHEETS_MAIN_CONFIG
 from datetime import date, datetime, timedelta
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -578,17 +578,225 @@ def update_google_sheet_by_order(data: list[dict]):
         logging.error(f"Произошла ошибка при работе с Google Sheets: {e}")
 
 
+def update_google_sheet_orders(data: list[dict]):
+    """
+    Обновляет данные на листе "Заказы" в основной таблице.
+    Находит строку по номеру заказа (столбец B) и обновляет нужные поля.
+    Если номер заказа не найден, пропускает эту запись.
+
+    Args:
+        data: Список словарей с данными из БД (с группировкой по заказам).
+    """
+    try:
+        logging.info("Авторизация в Google Sheets для обновления листа 'Заказы'...")
+        scope = ["https://spreadsheets.google.com/feeds", 'https://www.googleapis.com/auth/spreadsheets',
+                 "https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/drive"]
+
+        creds = ServiceAccountCredentials.from_json_keyfile_name(
+            GOOGLE_SHEETS_MAIN_CONFIG['credentials_file'], scope
+        )
+        client = gspread.authorize(creds)
+
+        logging.info(f"Открытие таблицы по ID '{GOOGLE_SHEETS_MAIN_CONFIG['spreadsheet_id']}'...")
+        spreadsheet = client.open_by_key(GOOGLE_SHEETS_MAIN_CONFIG['spreadsheet_id'])
+        sheet = spreadsheet.worksheet(GOOGLE_SHEETS_MAIN_CONFIG['worksheet_name_orders'])
+
+        logging.info("Получение существующих данных из листа 'Заказы'...")
+        try:
+            sheet_values = sheet.get_all_values()
+        except gspread.exceptions.GSpreadException as e:
+            logging.warning(f"Не удалось прочитать лист (возможно, он пуст): {e}")
+            sheet_values = []
+
+        if not sheet_values or len(sheet_values) < 2:
+            logging.error("Лист 'Заказы' пуст или не содержит заголовков. Невозможно выполнить обновление.")
+            return
+
+        # Получаем заголовки из первой строки
+        header = [str(h).strip() for h in sheet_values[0]]
+        logging.info(f"Заголовки таблицы: {header}")
+
+        # Определяем индексы столбцов (столбцы считаются с 0)
+        try:
+            # Пробуем найти столбец с номером заказа по разным вариантам названия
+            order_col_idx = None
+            for possible_name in ['номер', 'Номер', 'Номер заказа', 'ном ер']:
+                try:
+                    order_col_idx = header.index(possible_name)
+                    logging.info(f"Найден столбец с номером заказа: '{possible_name}' (индекс {order_col_idx})")
+                    break
+                except ValueError:
+                    continue
+
+            if order_col_idx is None:
+                raise ValueError("Не найден столбец с номером заказа. Проверьте заголовки.")
+
+            # Ищем остальные столбцы, используя точные названия из заголовков
+            proddate_col_idx = None
+            qty_izd_col_idx = None
+            qty_glass_col_idx = None
+            qty_mosnet_col_idx = None
+            qty_iron_col_idx = None
+            qty_windowsills_col_idx = None
+            qty_sandwiches_col_idx = None
+
+            for idx, col_name in enumerate(header):
+                if col_name == 'Дата произв-ва':
+                    proddate_col_idx = idx
+                elif col_name == 'Кол-во изд.':
+                    qty_izd_col_idx = idx
+                elif col_name == 'кол-во зап.':
+                    qty_glass_col_idx = idx
+                elif col_name == 'М/С':
+                    qty_mosnet_col_idx = idx
+                elif col_name == 'Изд из мет.':
+                    qty_iron_col_idx = idx
+                elif col_name == 'Подок-ки':
+                    qty_windowsills_col_idx = idx
+                elif col_name == 'Сендв':
+                    qty_sandwiches_col_idx = idx
+
+            # Проверяем, что все столбцы найдены
+            missing_columns = []
+            if proddate_col_idx is None:
+                missing_columns.append('Дата произв-ва')
+            if qty_izd_col_idx is None:
+                missing_columns.append('Кол-во изд.')
+            if qty_glass_col_idx is None:
+                missing_columns.append('кол-во зап.')
+            if qty_mosnet_col_idx is None:
+                missing_columns.append('М/С')
+            if qty_iron_col_idx is None:
+                missing_columns.append('Изд из мет.')
+            if qty_windowsills_col_idx is None:
+                missing_columns.append('Подок-ки')
+            if qty_sandwiches_col_idx is None:
+                missing_columns.append('Сендв')
+
+            if missing_columns:
+                raise ValueError(f"Не найдены столбцы: {', '.join(missing_columns)}")
+        except ValueError as e:
+            logging.error(f"На листе 'Заказы' отсутствует обязательный столбец: {e}. Невозможно выполнить обновление.")
+            return
+
+        # Создаем карту: номер заказа -> индекс строки (1-based для API)
+        order_to_row_map = {}
+        for i, row in enumerate(sheet_values[1:], start=2):  # Начинаем со строки 2 (индекс 1 - заголовок)
+            if order_col_idx < len(row):
+                order_number = str(row[order_col_idx]).strip()
+                if order_number:
+                    order_to_row_map[order_number] = i
+
+        logging.info(f"Найдено {len(order_to_row_map)} заказов в таблице.")
+
+        # Подготавливаем batch-обновления
+        updates_batch = []
+        updated_count = 0
+        skipped_count = 0
+
+        for row_dict in data:
+            order_no = str(row_dict.get('ORDERNO', '')).strip()
+            if not order_no:
+                skipped_count += 1
+                continue
+
+            if order_no not in order_to_row_map:
+                logging.debug(f"Заказ {order_no} не найден в таблице, пропускаем.")
+                skipped_count += 1
+                continue
+
+            row_number = order_to_row_map[order_no]
+
+            # Формируем данные для обновления
+            # Дата производства
+            proddate = row_dict.get('PRODDATE')
+            if isinstance(proddate, (date, datetime)):
+                proddate_str = proddate.strftime('%d.%m.%Y')
+            else:
+                proddate_str = str(proddate) if proddate else ''
+
+            # Количественные показатели (если нет данных - ставим 0)
+            qty_izd = row_dict.get('QTY_IZD_PVH', 0) or 0
+            qty_glass = row_dict.get('QTY_GLASS_PACKS', 0) or 0
+            qty_mosnet = row_dict.get('QTY_MOSNET', 0) or 0
+            qty_iron = row_dict.get('QTY_IRON', 0) or 0
+            qty_windowsills = row_dict.get('QTY_WINDOWSILLS', 0) or 0
+            qty_sandwiches = row_dict.get('QTY_SANDWICHES', 0) or 0
+
+            # Обновляем только нужные столбцы
+            # Столбец E (Кол-во изд.)
+            updates_batch.append({
+                'range': f'{chr(ord("A") + qty_izd_col_idx)}{row_number}',
+                'values': [[qty_izd]]
+            })
+
+            # Столбец F (кол-в о зап.)
+            updates_batch.append({
+                'range': f'{chr(ord("A") + qty_glass_col_idx)}{row_number}',
+                'values': [[qty_glass]]
+            })
+
+            # Столбец H (Дата произв-ва)
+            updates_batch.append({
+                'range': f'{chr(ord("A") + proddate_col_idx)}{row_number}',
+                'values': [[proddate_str]]
+            })
+
+            # Столбец J (М/С)
+            updates_batch.append({
+                'range': f'{chr(ord("A") + qty_mosnet_col_idx)}{row_number}',
+                'values': [[qty_mosnet]]
+            })
+
+            # Столбец K (Изд из мет.)
+            updates_batch.append({
+                'range': f'{chr(ord("A") + qty_iron_col_idx)}{row_number}',
+                'values': [[qty_iron]]
+            })
+
+            # Столбец L (Подок)
+            updates_batch.append({
+                'range': f'{chr(ord("A") + qty_windowsills_col_idx)}{row_number}',
+                'values': [[qty_windowsills]]
+            })
+
+            # Столбец M (Сендв)
+            updates_batch.append({
+                'range': f'{chr(ord("A") + qty_sandwiches_col_idx)}{row_number}',
+                'values': [[qty_sandwiches]]
+            })
+
+            updated_count += 1
+
+        if updates_batch:
+            logging.info(f"Обновление {updated_count} заказов ({len(updates_batch)} ячеек)...")
+            # Batch update может принимать максимум 500 запросов за раз
+            # Разбиваем на части если нужно
+            batch_size = 500
+            for i in range(0, len(updates_batch), batch_size):
+                batch_chunk = updates_batch[i:i + batch_size]
+                sheet.batch_update(batch_chunk, value_input_option='USER_ENTERED')
+                logging.info(f"Обновлено {min(i + batch_size, len(updates_batch))}/{len(updates_batch)} ячеек.")
+
+        logging.info(f"Обновление завершено. Обновлено заказов: {updated_count}, Пропущено: {skipped_count}")
+
+    except FileNotFoundError:
+        logging.error(f"Файл {GOOGLE_SHEETS_MAIN_CONFIG['credentials_file']} не найден.")
+    except Exception as e:
+        logging.error(f"Произошла ошибка при работе с Google Sheets (лист 'Заказы'): {e}", exc_info=True)
+
+
 if __name__ == '__main__':
     # Пример использования:
     # Для запуска этого примера, убедитесь, что у вас есть credentials.json
     # и вы предоставили доступ сервисному аккаунту к вашей таблице.
-    
+
     # Пример данных
     sample_data = [
         {'PRODDATE': date(2023, 10, 1), 'QTY_IZD_PVH': 10, 'QTY_RAZDV': 5, 'QTY_MOSNET': 20},
         {'PRODDATE': date(2023, 10, 2), 'QTY_IZD_PVH': 12, 'QTY_RAZDV': 8, 'QTY_MOSNET': 22},
     ]
-    
+
     update_google_sheet(sample_data)
     # print("Для тестирования этого модуля раскомментируйте вызов update_google_sheet "
     #       "и убедитесь в наличии credentials.json")

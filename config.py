@@ -16,9 +16,16 @@ DB_CONFIG = {
 # Настройки Google Sheets
 GOOGLE_SHEETS_CONFIG = {
     'credentials_file': os.getenv('GOOGLE_CREDENTIALS_FILE', 'credentials.json'),
-    'spreadsheet_name': os.getenv('GOOGLE_SPREADSHEET_NAME', 'FMO Altawin'),
+    'spreadsheet_name': os.getenv('GOOGLE_SPREADSHEET_NAME', 'Копия ТАБЛИЦА УЧЕТА ЗАКАЗОВ для тестирования'),
     'worksheet_name': os.getenv('GOOGLE_WORKSHEET_NAME', 'Общий'),
     'worksheet_name_by_order': os.getenv('GOOGLE_WORKSHEET_NAME_BY_ORDER', 'Расшифр по заказам')
+}
+
+# Настройки для основной таблицы (новая таблица)
+GOOGLE_SHEETS_MAIN_CONFIG = {
+    'credentials_file': os.getenv('GOOGLE_CREDENTIALS_FILE', 'credentials.json'),
+    'spreadsheet_id': os.getenv('GOOGLE_MAIN_SPREADSHEET_ID', '1fqiuKMSO4Yv25esmifboUdYM_qpczjOi-famtCeSnXE'),
+    'worksheet_name_orders': os.getenv('GOOGLE_MAIN_WORKSHEET_ORDERS', 'Заказы')
 }
 
 # SQL-запросы

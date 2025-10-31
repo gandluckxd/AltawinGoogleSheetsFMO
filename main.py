@@ -3,7 +3,7 @@ import time
 import logging
 from datetime import date, timedelta, datetime
 from database import get_data_from_db, get_data_from_db_by_order
-from google_sheets import update_google_sheet, update_google_sheet_by_order
+from google_sheets import update_google_sheet, update_google_sheet_by_order, update_google_sheet_orders
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -75,6 +75,12 @@ def job():
         update_google_sheet_by_order(db_data_by_order)
     else:
         logging.warning("Пропускаем обновление Google Sheets по заказам, так как данные из БД не были получены.")
+
+    # Обновляем основную таблицу (лист "Заказы")
+    if db_data_by_order is not None:
+        update_google_sheet_orders(db_data_by_order)
+    else:
+        logging.warning("Пропускаем обновление основной таблицы (лист 'Заказы'), так как данные из БД не были получены.")
 
     logging.info("Задача завершена. Следующий запуск через 5 минут.")
 
