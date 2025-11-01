@@ -675,6 +675,12 @@ def update_google_sheet_orders(data: list[dict]):
 
             if missing_columns:
                 raise ValueError(f"Не найдены столбцы: {', '.join(missing_columns)}")
+
+            # Логируем найденные индексы столбцов
+            logging.info(f"Индексы столбцов: order={order_col_idx}, proddate={proddate_col_idx}, "
+                        f"qty_izd={qty_izd_col_idx}, qty_glass={qty_glass_col_idx}, "
+                        f"qty_mosnet={qty_mosnet_col_idx}, qty_iron={qty_iron_col_idx}, "
+                        f"qty_windowsills={qty_windowsills_col_idx}, qty_sandwiches={qty_sandwiches_col_idx}")
         except ValueError as e:
             logging.error(f"На листе 'Заказы' отсутствует обязательный столбец: {e}. Невозможно выполнить обновление.")
             return
@@ -689,7 +695,19 @@ def update_google_sheet_orders(data: list[dict]):
 
         logging.info(f"Найдено {len(order_to_row_map)} заказов в таблице.")
 
+        # Функция для преобразования индекса столбца в буквенное обозначение (A, B, ..., Z, AA, AB, ...)
+        def col_idx_to_letter(idx):
+            """Преобразует индекс столбца (0-based) в буквенное обозначение."""
+            result = ""
+            idx += 1  # Переводим в 1-based
+            while idx > 0:
+                idx -= 1
+                result = chr(ord('A') + (idx % 26)) + result
+                idx //= 26
+            return result
+
         # Подготавливаем batch-обновления
+        # Группируем соседние столбцы для уменьшения количества запросов
         updates_batch = []
         updated_count = 0
         skipped_count = 0
@@ -697,11 +715,12 @@ def update_google_sheet_orders(data: list[dict]):
         for row_dict in data:
             order_no = str(row_dict.get('ORDERNO', '')).strip()
             if not order_no:
+                logging.warning(f"Пропущен заказ с пустым номером: {row_dict}")
                 skipped_count += 1
                 continue
 
             if order_no not in order_to_row_map:
-                logging.debug(f"Заказ {order_no} не найден в таблице, пропускаем.")
+                logging.warning(f"Заказ №{order_no} не найден в таблице (дата: {row_dict.get('PRODDATE')}), пропускаем.")
                 skipped_count += 1
                 continue
 
@@ -723,60 +742,101 @@ def update_google_sheet_orders(data: list[dict]):
             qty_windowsills = row_dict.get('QTY_WINDOWSILLS', 0) or 0
             qty_sandwiches = row_dict.get('QTY_SANDWICHES', 0) or 0
 
-            # Обновляем только нужные столбцы
-            # Столбец E (Кол-во изд.)
-            updates_batch.append({
-                'range': f'{chr(ord("A") + qty_izd_col_idx)}{row_number}',
-                'values': [[qty_izd]]
-            })
+            # Отладочное логирование для первых 3 заказов
+            if updated_count < 3:
+                logging.info(f"Заказ №{order_no}: PRODDATE={proddate_str}, QTY_IRON={qty_iron}, row_dict keys={list(row_dict.keys())}")
 
-            # Столбец F (кол-в о зап.)
-            updates_batch.append({
-                'range': f'{chr(ord("A") + qty_glass_col_idx)}{row_number}',
-                'values': [[qty_glass]]
-            })
+            # Группа 1: Столбцы E-F (Кол-во изд. и кол-во зап.) - индексы 4,5
+            if qty_izd_col_idx == 4 and qty_glass_col_idx == 5:
+                updates_batch.append({
+                    'range': f'{col_idx_to_letter(4)}{row_number}:{col_idx_to_letter(5)}{row_number}',
+                    'values': [[qty_izd, qty_glass]]
+                })
+            else:
+                # Если индексы не подряд, обновляем по отдельности
+                updates_batch.append({
+                    'range': f'{col_idx_to_letter(qty_izd_col_idx)}{row_number}',
+                    'values': [[qty_izd]]
+                })
+                updates_batch.append({
+                    'range': f'{col_idx_to_letter(qty_glass_col_idx)}{row_number}',
+                    'values': [[qty_glass]]
+                })
 
-            # Столбец H (Дата произв-ва)
+            # Дата произв-ва (отдельно, т.к. рядом защищённые столбцы)
             updates_batch.append({
-                'range': f'{chr(ord("A") + proddate_col_idx)}{row_number}',
+                'range': f'{col_idx_to_letter(proddate_col_idx)}{row_number}',
                 'values': [[proddate_str]]
             })
 
-            # Столбец J (М/С)
-            updates_batch.append({
-                'range': f'{chr(ord("A") + qty_mosnet_col_idx)}{row_number}',
-                'values': [[qty_mosnet]]
-            })
-
-            # Столбец K (Изд из мет.)
-            updates_batch.append({
-                'range': f'{chr(ord("A") + qty_iron_col_idx)}{row_number}',
-                'values': [[qty_iron]]
-            })
-
-            # Столбец L (Подок)
-            updates_batch.append({
-                'range': f'{chr(ord("A") + qty_windowsills_col_idx)}{row_number}',
-                'values': [[qty_windowsills]]
-            })
-
-            # Столбец M (Сендв)
-            updates_batch.append({
-                'range': f'{chr(ord("A") + qty_sandwiches_col_idx)}{row_number}',
-                'values': [[qty_sandwiches]]
-            })
+            # Группа 2: Столбцы J-M (М/С, Изд из мет., Подок-ки, Сендв) - индексы 9,10,11,12
+            if (qty_mosnet_col_idx == 9 and qty_iron_col_idx == 10 and
+                qty_windowsills_col_idx == 11 and qty_sandwiches_col_idx == 12):
+                updates_batch.append({
+                    'range': f'{col_idx_to_letter(9)}{row_number}:{col_idx_to_letter(12)}{row_number}',
+                    'values': [[qty_mosnet, qty_iron, qty_windowsills, qty_sandwiches]]
+                })
+            else:
+                # Если индексы не подряд, обновляем по отдельности
+                updates_batch.append({
+                    'range': f'{col_idx_to_letter(qty_mosnet_col_idx)}{row_number}',
+                    'values': [[qty_mosnet]]
+                })
+                updates_batch.append({
+                    'range': f'{col_idx_to_letter(qty_iron_col_idx)}{row_number}',
+                    'values': [[qty_iron]]
+                })
+                updates_batch.append({
+                    'range': f'{col_idx_to_letter(qty_windowsills_col_idx)}{row_number}',
+                    'values': [[qty_windowsills]]
+                })
+                updates_batch.append({
+                    'range': f'{col_idx_to_letter(qty_sandwiches_col_idx)}{row_number}',
+                    'values': [[qty_sandwiches]]
+                })
 
             updated_count += 1
 
         if updates_batch:
-            logging.info(f"Обновление {updated_count} заказов ({len(updates_batch)} ячеек)...")
+            logging.info(f"Обновление {updated_count} заказов ({len(updates_batch)} запросов)...")
             # Batch update может принимать максимум 500 запросов за раз
             # Разбиваем на части если нужно
             batch_size = 500
             for i in range(0, len(updates_batch), batch_size):
                 batch_chunk = updates_batch[i:i + batch_size]
                 sheet.batch_update(batch_chunk, value_input_option='USER_ENTERED')
-                logging.info(f"Обновлено {min(i + batch_size, len(updates_batch))}/{len(updates_batch)} ячеек.")
+                logging.info(f"Обновлено {min(i + batch_size, len(updates_batch))}/{len(updates_batch)} запросов.")
+
+        # Применяем числовое форматирование к столбцу K (Изд из мет.)
+        try:
+            logging.info("Применение числового форматирования к столбцу K (Изд из мет.)...")
+            sheet_id = sheet.id if hasattr(sheet, 'id') else sheet._properties.get('sheetId')
+
+            # Форматируем весь столбец K (индекс 10) как число
+            format_request = {
+                'requests': [{
+                    'repeatCell': {
+                        'range': {
+                            'sheetId': sheet_id,
+                            'startColumnIndex': qty_iron_col_idx,
+                            'endColumnIndex': qty_iron_col_idx + 1
+                        },
+                        'cell': {
+                            'userEnteredFormat': {
+                                'numberFormat': {
+                                    'type': 'NUMBER',
+                                    'pattern': '0'
+                                }
+                            }
+                        },
+                        'fields': 'userEnteredFormat.numberFormat'
+                    }
+                }]
+            }
+            spreadsheet.batch_update(format_request)
+            logging.info("Числовое форматирование применено к столбцу K.")
+        except Exception as e:
+            logging.error(f"Ошибка при применении форматирования к столбцу K: {e}")
 
         logging.info(f"Обновление завершено. Обновлено заказов: {updated_count}, Пропущено: {skipped_count}")
 

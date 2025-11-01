@@ -3,7 +3,12 @@
     "allow": [
       "Bash(python main.py:*)",
       "Bash(..venvScriptsactivate)",
-      "Bash(powershell -Command \"cd d:\\AltawinGoogleSheets; .\\.venv\\Scripts\\Activate.ps1; python main.py\")"
+      "Bash(powershell -Command \"cd d:\\AltawinGoogleSheets; .\\.venv\\Scripts\\Activate.ps1; python main.py\")",
+      "Bash(powershell -Command \".\\.venv\\Scripts\\Activate.ps1; python main.py\")",
+      "Bash(timeout 120 powershell:*)",
+      "Bash(Select-String -Pattern \"Заказ №|QTY_IRON|Индексы столбцов\")",
+      "Bash(Select-Object -First 20)",
+      "Bash(timeout 60 powershell:*)"
     ],
     "deny": [],
     "ask": []

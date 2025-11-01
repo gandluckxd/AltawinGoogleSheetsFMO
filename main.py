@@ -13,10 +13,10 @@ def job():
     """
     logging.info("Запуск задачи по обновлению данных...")
     
-    # Определяем период - за последние 14 дней и на 10 дней вперед
+    # Определяем период - за последние 2 дня и на 3 дня вперед
     today = date.today()
-    start_date = today - timedelta(days=14)
-    end_date = today + timedelta(days=14)
+    start_date = today - timedelta(days=2)
+    end_date = today + timedelta(days=3)
     
     # 1. Получаем данные из Firebird
     db_data = get_data_from_db(start_date, end_date)
