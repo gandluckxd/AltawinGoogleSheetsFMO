@@ -226,5 +226,14 @@ SQL_QUERIES_BY_ORDER = {
         and gg.isggset = 1
         and ((gg.marking like '%Водоотлив%') or (gg.marking like '%Железо%') or (gg.marking like '%Козырек%') or (gg.marking like '%Нащельник%'))
         group by o.proddate, o.orderno
+    """,
+    'totalprice': """
+        select
+            o.proddate,
+            o.orderno,
+            o.totalprice
+        from orders o
+        where o.proddate between ? and ?
+        group by o.proddate, o.orderno, o.totalprice
     """
 }

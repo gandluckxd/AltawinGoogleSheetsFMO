@@ -8,7 +8,11 @@
       "Bash(timeout 120 powershell:*)",
       "Bash(Select-String -Pattern \"Заказ №|QTY_IRON|Индексы столбцов\")",
       "Bash(Select-Object -First 20)",
-      "Bash(timeout 60 powershell:*)"
+      "Bash(timeout 60 powershell:*)",
+      "mcp__mcp-firebird__describe-table",
+      "mcp__mcp-firebird__get-field-descriptions",
+      "mcp__mcp-firebird__execute-query",
+      "Bash(Select-String -Pattern \"сумма заказа\" -Context 2)"
     ],
     "deny": [],
     "ask": []
