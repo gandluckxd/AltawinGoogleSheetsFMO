@@ -1,10 +1,29 @@
 import gspread
 import logging
+import math
 from oauth2client.service_account import ServiceAccountCredentials
 from config import GOOGLE_SHEETS_CONFIG, GOOGLE_SHEETS_MAIN_CONFIG
 from datetime import date, datetime, timedelta
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
+def round_up_to_10(value: float) -> float:
+    """
+    Округляет значение до 10 рублей в большую сторону.
+
+    Например:
+    - 45352.12 -> 45360.00
+    - 45360.00 -> 45360.00
+    - 100.01 -> 110.00
+
+    Args:
+        value: Исходное значение для округления
+
+    Returns:
+        Округленное значение
+    """
+    return math.ceil(value / 10) * 10
 
 def update_google_sheet(data: list[dict]):
     """
@@ -748,9 +767,9 @@ def update_google_sheet_orders(data: list[dict]):
             # Количественные показатели (если нет данных - ставим 0)
             qty_izd = row_dict.get('QTY_IZD_PVH', 0) or 0
             qty_glass = row_dict.get('QTY_GLASS_PACKS', 0) or 0
-            # Преобразуем Decimal в float для JSON сериализации
+            # Преобразуем Decimal в float для JSON сериализации и округляем до 10 рублей в большую сторону
             totalprice_raw = row_dict.get('TOTALPRICE', 0) or 0
-            totalprice = float(totalprice_raw) if totalprice_raw else 0
+            totalprice = round_up_to_10(float(totalprice_raw)) if totalprice_raw else 0
             qty_razdv = row_dict.get('QTY_RAZDV', 0) or 0
             qty_mosnet = row_dict.get('QTY_MOSNET', 0) or 0
             qty_iron = row_dict.get('QTY_IRON', 0) or 0
