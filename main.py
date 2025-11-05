@@ -2,8 +2,10 @@ import schedule
 import time
 import logging
 from datetime import date, timedelta, datetime
-from database import get_data_from_db, get_data_from_db_by_order
-from google_sheets import update_google_sheet, update_google_sheet_by_order, update_google_sheet_orders
+# from database import get_data_from_db  # ЗАКОММЕНТИРОВАНО: больше не используется
+from database import get_data_from_db_by_order
+# from google_sheets import update_google_sheet, update_google_sheet_by_order  # ЗАКОММЕНТИРОВАНО: больше не используется
+from google_sheets import update_google_sheet_orders
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -19,12 +21,15 @@ def job():
     end_date = today + timedelta(days=3)
     
     # 1. Получаем данные из Firebird
-    db_data = get_data_from_db(start_date, end_date)
-    
+    # ЗАКОММЕНТИРОВАНО: Запрос общих данных за дату больше не используется
+    # db_data = get_data_from_db(start_date, end_date)
+
     # Получаем данные с разбивкой по заказам
     db_data_by_order = get_data_from_db_by_order(start_date, end_date)
 
     # 2. Если данные успешно получены, обрабатываем их и обновляем Google Sheet
+    # ЗАКОММЕНТИРОВАНО: Загрузка в лист "Общий" больше не используется
+    """
     if db_data is not None:
         # Создаем полный список дат за период
         all_dates = [start_date + timedelta(days=x) for x in range((end_date - start_date).days + 1)]
@@ -69,12 +74,16 @@ def job():
         update_google_sheet(full_data)
     else:
         logging.warning("Пропускаем обновление Google Sheets, так как данные из БД не были получены.")
-        
+    """
+
+    # ЗАКОММЕНТИРОВАНО: Обновление листа "Расшифр по заказам" больше не используется
+    """
     # Обновляем лист с данными по заказам
     if db_data_by_order is not None:
         update_google_sheet_by_order(db_data_by_order)
     else:
         logging.warning("Пропускаем обновление Google Sheets по заказам, так как данные из БД не были получены.")
+    """
 
     # Обновляем основную таблицу (лист "Заказы")
     if db_data_by_order is not None:

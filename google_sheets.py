@@ -888,6 +888,15 @@ def update_google_sheet_orders(data: list[dict]):
 
         logging.info(f"Обновление завершено. Обновлено заказов: {updated_count}, Пропущено: {skipped_count}")
 
+        # Обновляем время последнего обновления в объединенной ячейке A2
+        try:
+            logging.info("Обновление времени последнего обновления в ячейке A2...")
+            now = datetime.now().strftime('%d.%m.%Y %H:%M:%S')
+            sheet.update('A2', [[f"Последнее обновление: {now}"]])
+            logging.info("Время последнего обновления успешно записано в A2.")
+        except Exception as e:
+            logging.error(f"Не удалось обновить ячейку A2: {e}")
+
     except FileNotFoundError:
         logging.error(f"Файл {GOOGLE_SHEETS_MAIN_CONFIG['credentials_file']} не найден.")
     except Exception as e:
