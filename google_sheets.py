@@ -10,12 +10,14 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 def round_up_to_10(value: float) -> float:
     """
-    Округляет значение до 10 рублей в большую сторону.
+    Округляет значение до 10 рублей по математическому принципу.
 
     Например:
-    - 45352.12 -> 45360.00
+    - 45352.12 -> 45350.00
+    - 45355.00 -> 45360.00
     - 45360.00 -> 45360.00
-    - 100.01 -> 110.00
+    - 100.01 -> 100.00
+    - 105.00 -> 110.00
 
     Args:
         value: Исходное значение для округления
@@ -23,7 +25,7 @@ def round_up_to_10(value: float) -> float:
     Returns:
         Округленное значение
     """
-    return math.ceil(value / 10) * 10
+    return round(value / 10) * 10
 
 def update_google_sheet(data: list[dict]):
     """
@@ -671,7 +673,7 @@ def update_google_sheet_orders(data: list[dict]):
                     qty_glass_col_idx = idx
                 elif col_name == 'сумма заказа':
                     totalprice_col_idx = idx
-                elif col_name == 'Раздв':
+                elif col_name == 'Раздвижка':
                     qty_razdv_col_idx = idx
                 elif col_name == 'М/С':
                     qty_mosnet_col_idx = idx
@@ -693,7 +695,7 @@ def update_google_sheet_orders(data: list[dict]):
             if totalprice_col_idx is None:
                 missing_columns.append('сумма заказа')
             if qty_razdv_col_idx is None:
-                missing_columns.append('Раздв')
+                missing_columns.append('Раздвижка')
             if qty_mosnet_col_idx is None:
                 missing_columns.append('М/С')
             if qty_iron_col_idx is None:

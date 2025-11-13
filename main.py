@@ -15,10 +15,10 @@ def job():
     """
     logging.info("Запуск задачи по обновлению данных...")
     
-    # Определяем период - за последние 2 дня и на 3 дня вперед
+    # Определяем период - за последние 7 дней и на 1 день вперед
     today = date.today()
-    start_date = today - timedelta(days=2)
-    end_date = today + timedelta(days=3)
+    start_date = today - timedelta(days=7)
+    end_date = today + timedelta(days=1)
     
     # 1. Получаем данные из Firebird
     # ЗАКОММЕНТИРОВАНО: Запрос общих данных за дату больше не используется

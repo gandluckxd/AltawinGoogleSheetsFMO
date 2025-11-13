@@ -24,7 +24,7 @@ GOOGLE_SHEETS_CONFIG = {
 # Настройки для основной таблицы (новая таблица)
 GOOGLE_SHEETS_MAIN_CONFIG = {
     'credentials_file': os.getenv('GOOGLE_CREDENTIALS_FILE', 'credentials.json'),
-    'spreadsheet_id': os.getenv('GOOGLE_MAIN_SPREADSHEET_ID', '1fqiuKMSO4Yv25esmifboUdYM_qpczjOi-famtCeSnXE'),
+    'spreadsheet_id': os.getenv('GOOGLE_MAIN_SPREADSHEET_ID', '1pbz9K6uarZy-3oax9OGfyA6MxtDCNoI9noavlr1YhOc'),
     'worksheet_name_orders': os.getenv('GOOGLE_MAIN_WORKSHEET_ORDERS', 'Заказы')
 }
 
@@ -136,9 +136,11 @@ SQL_QUERIES_BY_ORDER = {
         JOIN orderitems oi ON oi.orderid = o.orderid
         JOIN models m ON m.orderitemsid = oi.orderitemsid
         JOIN r_systems rs ON rs.rsystemid = m.sysprofid
-        WHERE o.proddate BETWEEN ? AND ?
+        WHERE o.datemodified BETWEEN ? AND ?
+            AND o.proddate IS NOT NULL
             AND rs.systemtype = 0
             AND rs.rsystemid <> 8
+            AND rs.rsystemid <> 27
         GROUP BY o.proddate, o.orderno
     """,
     'razdv': """
@@ -150,7 +152,8 @@ SQL_QUERIES_BY_ORDER = {
         JOIN orderitems oi ON oi.orderid = o.orderid
         JOIN models m ON m.orderitemsid = oi.orderitemsid
         JOIN r_systems rs ON rs.rsystemid = m.sysprofid
-        WHERE o.proddate BETWEEN ? AND ?
+        WHERE o.datemodified BETWEEN ? AND ?
+            AND o.proddate IS NOT NULL
             AND ((rs.systemtype = 1) OR (rs.rsystemid = 8))
         GROUP BY o.proddate, o.orderno
     """,
@@ -162,7 +165,8 @@ SQL_QUERIES_BY_ORDER = {
         FROM orders o
         JOIN orderitems oi ON oi.orderid = o.orderid
         JOIN itemsdetail itd ON itd.orderitemsid = oi.orderitemsid
-        WHERE o.proddate BETWEEN ? AND ?
+        WHERE o.datemodified BETWEEN ? AND ?
+            AND o.proddate IS NOT NULL
             AND itd.grgoodsid = 46110
         GROUP BY o.proddate, o.orderno
     """,
@@ -178,25 +182,25 @@ SQL_QUERIES_BY_ORDER = {
         join modelfillings mf on mf.modelpartid = mp.modelpartid
         join gpackettypes gp on gp.gptypeid = mf.gptypeid
         join r_systems rs on rs.rsystemid = gp.rsystemid
-        where o.proddate between ? and ?
+        where o.datemodified between ? and ?
+        and o.proddate is not null
         and rs.rsystemid in (3, 21)
         group by o.proddate, o.orderno
     """,
     'sandwiches': """
-        select
+        SELECT
             o.proddate,
             o.orderno,
-            sum(oi.qty) as qty_sandwiches
-        from orders o
-        join orderitems oi on oi.orderid = o.orderid
-        join models m on m.orderitemsid = oi.orderitemsid
-        join modelparts mp on mp.modelid = m.modelid
-        join modelfillings mf on mf.modelpartid = mp.modelpartid
-        join gpackettypes gp on gp.gptypeid = mf.gptypeid
-        join r_systems rs on rs.rsystemid = gp.rsystemid
-        where o.proddate between ? and ?
-        and rs.rsystemid in (22)
-        group by o.proddate, o.orderno
+            SUM(oi.qty * itd.qty) AS qty_sandwiches
+        FROM orders o
+        JOIN orderitems oi ON oi.orderid = o.orderid
+        JOIN itemsdetail itd ON itd.orderitemsid = oi.orderitemsid
+        join groupgoods gg on gg.grgoodsid = itd.grgoodsid
+        join groupgoodstypes ggt on ggt.ggtypeid = gg.ggtypeid
+        WHERE o.datemodified BETWEEN ? AND ?
+            AND o.proddate IS NOT NULL
+            AND ggt.code = 'Sand'
+        GROUP BY o.proddate, o.orderno
     """,
     'windowsills': """
         select
@@ -208,7 +212,8 @@ SQL_QUERIES_BY_ORDER = {
         join itemsdetail i on i.orderitemsid = oi.orderitemsid
         join goods g on i.goodsid = g.goodsid
         join groupgoods gg on i.grgoodsid = gg.grgoodsid
-        where o.proddate between ? and ?
+        where o.datemodified between ? and ?
+        and o.proddate is not null
         and gg.ggtypeid = 42
         group by
             o.proddate, o.orderno
@@ -222,7 +227,8 @@ SQL_QUERIES_BY_ORDER = {
         join orders o on o.orderid = oi.orderid
         join itemssets its on its.orderitemsid = oi.orderitemsid
         join groupgoods gg on gg.grgoodsid = its.setid
-        where o.proddate between ? and ?
+        where o.datemodified between ? and ?
+        and o.proddate is not null
         and gg.isggset = 1
         and ((gg.marking like '%Водоотлив%') or (gg.marking like '%Железо%') or (gg.marking like '%Козырек%') or (gg.marking like '%Нащельник%'))
         group by o.proddate, o.orderno
@@ -233,7 +239,8 @@ SQL_QUERIES_BY_ORDER = {
             o.orderno,
             o.totalprice
         from orders o
-        where o.proddate between ? and ?
+        where o.datemodified between ? and ?
+        and o.proddate is not null
         group by o.proddate, o.orderno, o.totalprice
     """
 }

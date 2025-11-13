@@ -13,7 +13,22 @@
       "mcp__mcp-firebird__get-field-descriptions",
       "mcp__mcp-firebird__execute-query",
       "Bash(Select-String -Pattern \"сумма заказа\" -Context 2)",
-      "Bash(python -m py_compile:*)"
+      "Bash(python -m py_compile:*)",
+      "Bash(powershell -Command \"if (Test-Path .env) { Get-Content .env | Select-String -Pattern ''GOOGLE'' }\")",
+      "Bash(powershell -Command \"cd D:\\AltawinGoogleSheets; .\\.venv\\Scripts\\Activate.ps1; python test_main_table.py\")",
+      "Bash(powershell -Command \"cd D:\\AltawinGoogleSheets; .\\.venv\\Scripts\\Activate.ps1; python main.py\")",
+      "Bash(Select-String -Pattern \"Заказ №|QTY_IRON|Индексы столбцов|Обновлено заказов|Пропущено|ошибк|ERROR\" -Context 1)",
+      "Bash(Select-String -Pattern \"Заказ №|QTY_IRON|Индексы столбцов|Обновлено заказов|Пропущено|ошибк|ERROR|Запуск задачи|Получено и объединено|datemodified\" -Context 1)",
+      "mcp__mcp-firebird-vk-office__list-tables",
+      "mcp__mcp-firebird-vk__system-health-check",
+      "mcp__mcp-firebird-vk__list-tables",
+      "Bash(powershell -Command \"Test-NetConnection -ComputerName 91.144.149.184 -Port 3050\")",
+      "Bash(powershell -Command \"ping -n 2 91.144.149.184\")",
+      "Bash(powershell -Command:*)",
+      "Bash(timeout 10 powershell:*)",
+      "mcp__mcp-firebird__list-tables",
+      "Bash(claude mcp remove:*)",
+      "Bash(claude mcp add:*)"
     ],
     "deny": [],
     "ask": []
