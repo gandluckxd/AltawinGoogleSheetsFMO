@@ -242,5 +242,27 @@ SQL_QUERIES_BY_ORDER = {
         where o.datemodified between ? and ?
         and o.proddate is not null
         group by o.proddate, o.orderno, o.totalprice
+    """,
+    'orderid': """
+        select
+            o.proddate,
+            o.orderno,
+            o.orderid
+        from orders o
+        where o.datemodified between ? and ?
+        and o.proddate is not null
+        group by o.proddate, o.orderno, o.orderid
     """
 }
+
+# SQL-запрос для проверки готовности заказа
+SQL_QUERY_CHECK_ORDER_READINESS = """
+    select wd.isapproved
+    from orders o
+    join orderitems oi on oi.orderid = o.orderid
+    join models m on m.orderitemsid = oi.orderitemsid
+    left join ct_elements el on el.modelid = m.modelid
+    left join ct_whdetail wd on wd.ctelementsid = el.ctelementsid
+    where o.orderid = ?
+    and el.cttypeelemsid = 2
+"""

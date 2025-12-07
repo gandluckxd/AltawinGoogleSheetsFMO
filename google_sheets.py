@@ -663,6 +663,7 @@ def update_google_sheet_orders(data: list[dict]):
             qty_windowsills_col_idx = None
             qty_sandwiches_col_idx = None
             totalprice_col_idx = None
+            readiness_col_idx = None
 
             for idx, col_name in enumerate(header):
                 if col_name == 'Дата произв-ва':
@@ -683,6 +684,8 @@ def update_google_sheet_orders(data: list[dict]):
                     qty_windowsills_col_idx = idx
                 elif col_name == 'Сендв':
                     qty_sandwiches_col_idx = idx
+                elif col_name == 'Готовность из альтавина':
+                    readiness_col_idx = idx
 
             # Проверяем, что все столбцы найдены
             missing_columns = []
@@ -707,6 +710,10 @@ def update_google_sheet_orders(data: list[dict]):
 
             if missing_columns:
                 raise ValueError(f"Не найдены столбцы: {', '.join(missing_columns)}")
+
+            # Готовность - необязательный столбец, просто предупредим если его нет
+            if readiness_col_idx is None:
+                logging.warning("Столбец 'Готовность из альтавина' не найден в таблице. Данные о готовности не будут обновлены.")
 
             # Логируем найденные индексы столбцов
             logging.info(f"Индексы столбцов: order={order_col_idx}, proddate={proddate_col_idx}, "
@@ -777,10 +784,11 @@ def update_google_sheet_orders(data: list[dict]):
             qty_iron = row_dict.get('QTY_IRON', 0) or 0
             qty_windowsills = row_dict.get('QTY_WINDOWSILLS', 0) or 0
             qty_sandwiches = row_dict.get('QTY_SANDWICHES', 0) or 0
+            readiness = row_dict.get('READINESS', 'Не готов') or 'Не готов'
 
             # Отладочное логирование для первых 5 заказов
             if updated_count < 5:
-                logging.info(f"Заказ №{order_no}: PRODDATE={proddate_str}, TOTALPRICE={totalprice}, QTY_IRON={qty_iron}")
+                logging.info(f"Заказ №{order_no}: PRODDATE={proddate_str}, TOTALPRICE={totalprice}, QTY_IRON={qty_iron}, READINESS={readiness}")
                 logging.info(f"  Все ключи row_dict: {list(row_dict.keys())}")
                 logging.info(f"  Значение TOTALPRICE из row_dict: {row_dict.get('TOTALPRICE', 'ОТСУТСТВУЕТ')}")
 
@@ -821,6 +829,13 @@ def update_google_sheet_orders(data: list[dict]):
                 'range': f'{col_idx_to_letter(qty_sandwiches_col_idx)}{row_number}',
                 'values': [[qty_sandwiches]]
             })
+
+            # Обновляем столбец "Готовность" если он существует
+            if readiness_col_idx is not None:
+                updates_batch.append({
+                    'range': f'{col_idx_to_letter(readiness_col_idx)}{row_number}',
+                    'values': [[readiness]]
+                })
 
             updated_count += 1
 
@@ -883,8 +898,30 @@ def update_google_sheet_orders(data: list[dict]):
                     }
                 })
 
+            # Форматируем столбец "Готовность из альтавина" если он существует
+            if readiness_col_idx is not None:
+                format_requests.append({
+                    'repeatCell': {
+                        'range': {
+                            'sheetId': sheet_id,
+                            'startColumnIndex': readiness_col_idx,
+                            'endColumnIndex': readiness_col_idx + 1
+                        },
+                        'cell': {
+                            'userEnteredFormat': {
+                                'textFormat': {
+                                    'fontSize': 11,
+                                    'bold': False
+                                },
+                                'horizontalAlignment': 'CENTER'
+                            }
+                        },
+                        'fields': 'userEnteredFormat.textFormat,userEnteredFormat.horizontalAlignment'
+                    }
+                })
+
             spreadsheet.batch_update({'requests': format_requests})
-            logging.info("Форматирование применено: сумма заказа (денежное), остальные столбцы (целое число).")
+            logging.info("Форматирование применено: сумма заказа (денежное), количества (целое число), готовность (11px, не жирный, по центру).")
         except Exception as e:
             logging.error(f"Ошибка при применении форматирования к столбцам: {e}")
 
