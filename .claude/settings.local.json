@@ -29,7 +29,8 @@
       "mcp__mcp-firebird__list-tables",
       "Bash(claude mcp remove:*)",
       "Bash(claude mcp add:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(Select-String -Pattern \"def check_order_readiness\" -Context 0,20)"
     ],
     "deny": [],
     "ask": []

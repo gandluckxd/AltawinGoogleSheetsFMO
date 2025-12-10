@@ -784,7 +784,13 @@ def update_google_sheet_orders(data: list[dict]):
             qty_iron = row_dict.get('QTY_IRON', 0) or 0
             qty_windowsills = row_dict.get('QTY_WINDOWSILLS', 0) or 0
             qty_sandwiches = row_dict.get('QTY_SANDWICHES', 0) or 0
-            readiness = row_dict.get('READINESS', 'Не готов') or 'Не готов'
+
+            # Определяем готовность: если все количества = 0, то "Готов", иначе берем из БД
+            if (qty_izd == 0 and qty_glass == 0 and qty_razdv == 0 and
+                qty_mosnet == 0 and qty_iron == 0 and qty_windowsills == 0 and qty_sandwiches == 0):
+                readiness = 'Готов'
+            else:
+                readiness = row_dict.get('READINESS', 'Не готов') or 'Не готов'
 
             # Отладочное логирование для первых 5 заказов
             if updated_count < 5:

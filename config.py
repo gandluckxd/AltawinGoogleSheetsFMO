@@ -199,7 +199,7 @@ SQL_QUERIES_BY_ORDER = {
         join groupgoodstypes ggt on ggt.ggtypeid = gg.ggtypeid
         WHERE o.datemodified BETWEEN ? AND ?
             AND o.proddate IS NOT NULL
-            AND ggt.code = 'Sand'
+            AND ggt.code in ('Sand', 'SandDop')
         GROUP BY o.proddate, o.orderno
     """,
     'windowsills': """
@@ -252,6 +252,24 @@ SQL_QUERIES_BY_ORDER = {
         where o.datemodified between ? and ?
         and o.proddate is not null
         group by o.proddate, o.orderno, o.orderid
+    """,
+    'readiness': """
+        select
+            o.proddate,
+            o.orderno,
+            TRIM(case
+                when COUNT(DISTINCT el.ctelementsid) = 0 then 'Готов'
+                when COUNT(DISTINCT el.ctelementsid) = SUM(CASE WHEN wd.isapproved = 1 THEN 1 ELSE 0 END) then 'Готов'
+                else 'Не готов'
+            end) as readiness
+        from orders o
+        join orderitems oi on oi.orderid = o.orderid
+        join models m on m.orderitemsid = oi.orderitemsid
+        left join ct_elements el on el.modelid = m.modelid and el.cttypeelemsid = 2
+        left join ct_whdetail wd on wd.ctelementsid = el.ctelementsid
+        where o.datemodified between ? and ?
+        and o.proddate is not null
+        group by o.proddate, o.orderno
     """
 }
 
