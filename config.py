@@ -270,6 +270,19 @@ SQL_QUERIES_BY_ORDER = {
         where o.datemodified between ? and ?
         and o.proddate is not null
         group by o.proddate, o.orderno
+    """,
+    'order_state': """
+        select
+            o.proddate,
+            o.orderno,
+            os.NAME as order_state_name,
+            osr.CHANGEDATE as state_change_date
+        from orders o
+        left join ORDERSTATESREG osr on osr.ORDERID = o.ORDERID
+        left join ORDERSTATES os on os.ORDERSTATEID = osr.ORDERSTATEID
+        where o.datemodified between ? and ?
+        and o.proddate is not null
+        order by o.orderno, osr.STATEPOSIT desc
     """
 }
 

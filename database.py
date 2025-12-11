@@ -84,14 +84,14 @@ def get_data_from_db_by_order(start_date: date, end_date: date) -> list[dict] | 
         for key, query in SQL_QUERIES_BY_ORDER.items():
             logging.info(f"Выполнение SQL-запроса по заказам для: {key}...")
             cur.execute(query, (date1_str, date2_str))
-            
+
             columns = [desc[0] for desc in cur.description]
-            
+
             for row in cur.fetchall():
                 row_dict = dict(zip(columns, row))
                 proddate = row_dict.pop('PRODDATE')
                 orderno = row_dict.pop('ORDERNO')
-                
+
                 if isinstance(proddate, datetime):
                     proddate = proddate.date()
 
@@ -99,8 +99,13 @@ def get_data_from_db_by_order(start_date: date, end_date: date) -> list[dict] | 
 
                 if data_key not in all_data:
                     all_data[data_key] = {'PRODDATE': proddate, 'ORDERNO': orderno}
-                
-                all_data[data_key].update(row_dict)
+
+                # Для запроса order_state берем только первую запись (она уже отсортирована по STATEPOSIT DESC)
+                if key == 'order_state':
+                    if 'ORDER_STATE_NAME' not in all_data[data_key]:
+                        all_data[data_key].update(row_dict)
+                else:
+                    all_data[data_key].update(row_dict)
 
         logging.info(f"Получено и объединено данных по {len(all_data)} заказам.")
         
